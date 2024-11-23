@@ -52,6 +52,7 @@ jupyterlab_server==2.27.3
 jupyterlab_widgets==3.0.13
 kiwisolver==1.4.7
 lazy_loader==0.4
+Levenshtein==0.26.1
 librosa==0.10.2.post1
 llvmlite==0.43.0
 MarkupSafe==3.0.2
@@ -88,6 +89,7 @@ pywin32==308
 pywinpty==2.0.14
 PyYAML==6.0.2
 pyzmq==26.2.0
+RapidFuzz==3.10.1
 referencing==0.35.1
 requests==2.32.3
 rfc3339-validator==0.1.4
@@ -107,6 +109,7 @@ terminado==0.18.1
 threadpoolctl==3.5.0
 tinycss2==1.4.0
 tornado==6.4.1
+tqdm==4.67.0
 traitlets==5.14.3
 types-python-dateutil==2.9.0.20241003
 typing_extensions==4.12.2
