@@ -8,5 +8,5 @@ A tool to map audio input to keypresses for the rhythm game Taiko no Tatsujin
 
 ## Features
 
- - **DonKa Mapping:** Map your audio inputs to left/right Don's and Ka's by playing an easier chart. Map left/right Don's and Ka's to native keys.
- - **Performance Options:** Similar to how you can reduce graphics options to increase FPS, you can also modify chunk and buffer sizes for optimal gaming performance.
+ - **DonKa Mapping:** Map your audio inputs to left/right Don's and Ka's by following a metronome. Map left/right Don's and Ka's to native keys.
+ - **Performance Options:** Similar to how you can reduce graphics options to increase FPS, you can also modify chunk sizes, buffer sizes, and delay for optimal gaming performance.
