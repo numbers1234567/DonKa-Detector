@@ -6,7 +6,6 @@ import math
 import wave
 import time
 import threading
-import soundfile as sf
 import os
 import scipy.io.wavfile as wf
 
