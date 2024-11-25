@@ -8,6 +8,7 @@ import time
 import threading
 import os
 import scipy.io.wavfile as wf
+import matplotlib.pyplot as plt
 
 DON = 0
 KA  = 1
@@ -49,31 +50,17 @@ def play_donka_audio(donka_code: int, p: pyaudio.PyAudio|None=None):
     thread.start()
 
 def retrieve_audio_input(audio: np.ndarray, noise_stat: Tuple[float,float], sample_rate: float,
-                         min_frame_left: int=1024, min_frame_right: int=2048) -> np.ndarray|None:
+                         frame_left: int=1600, frame_right: int=3200) -> np.ndarray|None:
     # Use the first onset which is above the noise threshold
     onsets = librosa.onset.onset_detect(y=audio, sr=sample_rate, units="samples")
     rms = librosa.feature.rms(y=audio, frame_length=2048, hop_length=512)[0,]
     noise_med,noise_sig = noise_stat
 
     # Find onset with the maximum energy
-    max_energy_onset = (-10000, -1)
     for onset in onsets:
-        max_energy_onset = max(max_energy_onset, (rms[onset//512], onset))
-
-    onset = max_energy_onset[1]
-    # Check if onset is load enough
-    if rms[onset//512] <= noise_med + 3*noise_sig:
-        return
-    # go left until noise threshold is not met
-    start = onset - min_frame_left
-    while start - 512 >= 0 and rms[start//512 - 1] > noise_med + noise_sig:
-        start -= 512
-    # go right until noise threshold is not met
-    end = onset + min_frame_right
-    while end < len(audio) and rms[end//512] > noise_med + noise_sig:
-        end += 512
-    
-    return audio[start:end]
+        if onset >= frame_left and onset < len(audio) - frame_right \
+            and rms[onset//512] >= noise_med + 3*noise_sig:
+            return audio[onset-frame_left:onset+frame_right]
         
 
 
@@ -127,12 +114,12 @@ def record_inputs(donka_code: int,
         audio_arr[-chunk_sz:] = chunk
 
         # Retrieve input once a new audio has been fully consumed
-        rms = librosa.feature.rms(y=audio_arr[:2048], frame_length=2048, hop_length=512)[0,]
-        if rms[0] >= noise_stat[0] + 3*noise_stat[1]:
+        rms = librosa.feature.rms(y=audio_arr[:2048], frame_length=512, hop_length=512)[0,]
+        if rms[4] >= noise_stat[0] + 3*noise_stat[1]:
             note = retrieve_audio_input(audio_arr, noise_stat, sample_rate)
             if type(note)==np.ndarray and len(note) > 0:
                 input_samples.append(note.copy())
-                on_note_callback(note)
+                on_note_callback(note.copy())
                 audio_arr[:len(note) + 2048] = 0
                 #audio_arr = np.zeros_like(audio_arr)
 
@@ -185,6 +172,8 @@ def main(in_device_idx: int|None=None,
 
     in_stream.stop_stream()
     in_stream.close()
+
+    wf.write(os.path.join(target_dir, f"noise.wav"), sample_rate, noise_arr)
 
     # Map audio inputs to right-left dons/kas
     params = [(volume, side, donka) 
