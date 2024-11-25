@@ -57,7 +57,7 @@ def create_random_chart(x: List[np.ndarray], y: np.ndarray, noise_std: float=0.0
 def compute_mel_rep(note: np.ndarray, sr: int) -> np.ndarray:
     return librosa.feature.melspectrogram(y=note, sr=sr, n_mels=128, fmax=8000)
 
-def retrieve_chart_multi_k(audio: np.ndarray, sr: int, train_x: List[np.ndarray], train_y: np.ndarray, frame_left: int=1600, frame_right: int=3200, K=5, normalize=True) -> List[Tuple[int, int]]:
+def retrieve_chart_multik(audio: np.ndarray, sr: int, train_x: List[np.ndarray], train_y: np.ndarray, frame_left: int=1600, frame_right: int=3200, normalize=True) -> List[Tuple[int, int]]:
     onsets = librosa.onset.onset_detect(y=audio, sr=sr, units="samples")
 
     random.seed(123)
@@ -75,15 +75,12 @@ def retrieve_chart_multi_k(audio: np.ndarray, sr: int, train_x: List[np.ndarray]
     threshold = noisemedian + 3*sigma
     
     # Transform training data
-    train_mel: List[np.ndarray] = [compute_mel_rep(note, sr).flatten() for note in train_x]
+    train_mel: List[np.ndarray] = [compute_mel_rep(note, sr) for note in train_x]
     if normalize: train_mel: List[np.ndarray] = [i/np.sum(i) for i in train_mel]
 
     last_onset = -frame_left
 
     answer = []
-
-    knn = KNeighborsClassifier(K)
-    knn.fit(train_mel, [np.argmax(i) for i in train_y])
 
     # Classify each onset
     for onset in onsets:
@@ -101,33 +98,39 @@ def retrieve_chart_multi_k(audio: np.ndarray, sr: int, train_x: List[np.ndarray]
         note_mel = compute_mel_rep(note, sr=sr)
         if normalize: note_mel /= np.sum(note_mel)
 
-        # Problem-specific vote system
-        votes = knn.predict_proba([note_mel.flatten()])[0]
-        if votes[0] + votes[1] > votes[2] + votes[3]:
-            answer.append((onset, np.argmax(votes[:2])))
-        else:
-            answer.append((onset, np.argmax(votes[2:4]) + 2))
+        distances = []
+        for other,cls in zip(train_mel, train_y):
+            cls = np.argmax(cls)
+            distances.append((np.sqrt(np.sum((note_mel - other) ** 2)), cls))
+
+        distances.sort()
+        answer.append((onset, [c for d,c in distances]))
+
         last_onset = onset
     return answer
 
-def evaluate(normalize: bool, K: int, train_x: List[np.ndarray], train_y: np.ndarray, test_x: List[np.ndarray], test_y: np.ndarray, experiments: List[Tuple[int,float]], sr: int, noise_std: float=0.01, verbose=True, seed: int=42):
+type KNNHyperParamK = int
+type KNNHyperParamIsNorm = bool
+type KNNHyperParam = Tuple[KNNHyperParamK, KNNHyperParamIsNorm]
+type KNNHyperParamMetric = Dict[KNNHyperParam, Dict[float, Tuple[float, float]]]
+def evaluate(normalize: bool, K_max: int, train_x: List[np.ndarray], train_y: np.ndarray, test_x: List[np.ndarray], test_y: np.ndarray, experiments: List[Tuple[int,float]], sr: int, noise_std: float=0.01, verbose=True, seed: int=42) -> KNNHyperParamMetric:
     # So datasets are the same per-evaluation
     np.random.seed(seed)
     random.seed(seed)
 
 
-    hist = []
+    hist = [[] for _ in range(K_max)]
 
     # Metrics over all experiments
-    total_base_distance = 0
-    total_bin_distance = 0
-    total_pred = 0
-    if verbose: print(f"==== K={K} normalize={normalize} ====")
+    result: KNNHyperParamMetric = {}
+    if verbose: print(f"==== normalize={normalize} ====")
     for samples,note_rate in experiments:
         # Experiment-specific metric
-        num_pred = 0
-        base_l_distance = 0
-        bin_l_distance = 0
+        num_pred = [0] * K_max
+        base_l_distance = [0] * K_max
+        bin_l_distance = [0] * K_max
+
+        print(f"samples={samples}, rate={note_rate}")
 
         pbar = range(samples)
         for i in pbar:
@@ -136,26 +139,40 @@ def evaluate(normalize: bool, K: int, train_x: List[np.ndarray], train_y: np.nda
             chart_gt_sparse = [np.argmax(i) for idx,i in enumerate(chart_gt) if np.max(i) > 0.5]
             
             # Predict chart
-            chart_pred = retrieve_chart(audio, sr, train_x, train_y, K=K, normalize=normalize)            
+            chart_pred = retrieve_chart_multik(audio, sr, train_x, train_y, normalize=normalize)            
             chart_pred = [cls for onset,cls in chart_pred]
 
+            # Predictions for each K
+            chart_pred_k = [[] for _ in range(K_max)]
+            for cls in chart_pred:
+                votes = [0] * 4
+                for k in range(1, K_max + 1):
+                    votes[cls[k-1]] += 1
+                    if votes[0] + votes[1] > votes[2] + votes[3]:
+                        chart_pred_k[k-1].append(np.argmax(votes[:2]))
+                    elif votes[0] + votes[1] < votes[2] + votes[3]:
+                        chart_pred_k[k-1].append(np.argmax(votes[2:]) + 2)
+                    else:
+                        chart_pred_k[k-1].append(np.argmax(votes))
+
             # Compute metrics
-            base_l_distance += levenshtein_distance(chart_gt_sparse, chart_pred)
+            for k in range(1, K_max + 1):
+                base_l_distance[k-1] += levenshtein_distance(chart_gt_sparse, chart_pred_k[k-1])
 
-            chart_pred = [cls//2 for cls in chart_pred]
             chart_gt_sparse = [cls//2 for cls in chart_gt_sparse]
-            bin_l_distance += levenshtein_distance(chart_gt_sparse, chart_pred)
 
-            num_pred += len(chart_pred)
+            for k in range(1, K_max + 1):
+                chart_pred_k[k-1] = [cls//2 for cls in chart_pred_k[k-1]]
+                bin_l_distance[k-1] += levenshtein_distance(chart_gt_sparse, chart_pred_k[k-1])
+                if (k,normalize) not in result:
+                    result[(k, normalize)] = {}
+                result[(k, normalize)][note_rate] = (bin_l_distance[k-1], base_l_distance[k-1])
 
-        hist.append((base_l_distance, bin_l_distance, num_pred))
+                num_pred[k-1] += len(chart_pred_k[k-1])
         if verbose:
-            print(f"Experiment ({samples}, {note_rate}): ({num_pred}, {base_l_distance}, {bin_l_distance})")
-
-        total_base_distance += base_l_distance
-        total_bin_distance += bin_l_distance
-        total_pred += num_pred
-    return (total_base_distance, total_bin_distance, total_pred),hist
+            for idx,(n,base_d,bin_d) in enumerate(zip(num_pred, base_l_distance, bin_l_distance), start=1):
+                print(f" - K={idx}: ({n}, {base_d}, {bin_d})")
+    return result
 
 def retrieve_audio_inputs(target_dir: str="audio/user", sr: int=16000) -> Tuple[List[np.ndarray], np.ndarray, float]:
     donka_code2class = {
@@ -210,8 +227,7 @@ def main():
 
     
     hp = [
-        [normalize, k]
-        for k in range(1,6)
+        normalize
         for normalize in (True, False)
     ]
     experiments: List[Tuple[int,float]] = [ # Number of examples, note_rate
@@ -227,8 +243,8 @@ def main():
         (10, 8),
     ]
 
-    for normalize,k in hp:
-        evaluate(normalize, k, train_x, train_y, test_x, test_y, experiments, sr, noise_std=noise_std, verbose=True)
+    for normalize in hp:
+        evaluate(normalize, 5, train_x, train_y, test_x, test_y, experiments, sr, noise_std=noise_std, verbose=True)
 
 if __name__=="__main__":
     import argparse
