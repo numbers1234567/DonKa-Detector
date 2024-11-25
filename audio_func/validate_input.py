@@ -57,7 +57,7 @@ def create_random_chart(x: List[np.ndarray], y: np.ndarray, noise_std: float=0.0
 def compute_mel_rep(note: np.ndarray, sr: int) -> np.ndarray:
     return librosa.feature.melspectrogram(y=note, sr=sr, n_mels=128, fmax=8000)
 
-def retrieve_chart(audio: np.ndarray, sr: int, train_x: List[np.ndarray], train_y: np.ndarray, frame_left: int=1600, frame_right: int=3200, K=5, normalize=True) -> List[Tuple[int, int]]:
+def retrieve_chart_multi_k(audio: np.ndarray, sr: int, train_x: List[np.ndarray], train_y: np.ndarray, frame_left: int=1600, frame_right: int=3200, K=5, normalize=True) -> List[Tuple[int, int]]:
     onsets = librosa.onset.onset_detect(y=audio, sr=sr, units="samples")
 
     random.seed(123)
