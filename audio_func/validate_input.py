@@ -7,12 +7,7 @@ import librosa
 from sklearn.neighbors import KNeighborsClassifier
 import os
 import matplotlib.pyplot as plt
-
-DON = 0
-KA  = 1
-
-LEFT  = 0
-RIGHT = 2
+from utility import compute_mel_rep,retrieve_audio_inputs
 
 def create_random_chart(x: List[np.ndarray], y: np.ndarray, noise_std: float=0.01, note_rate: float=2, sr:int=16000, time_s: float = 5, frame_left: int=1600, frame_right: int=3200) -> Tuple[np.ndarray, np.ndarray]:
     # x: Arrays are wave forms
@@ -53,9 +48,6 @@ def create_random_chart(x: List[np.ndarray], y: np.ndarray, noise_std: float=0.0
     
 
     return audio,chart
-
-def compute_mel_rep(note: np.ndarray, sr: int) -> np.ndarray:
-    return librosa.feature.melspectrogram(y=note, sr=sr, n_mels=128, fmax=8000)
 
 def retrieve_chart_multik(audio: np.ndarray, sr: int, train_x: List[np.ndarray], train_y: np.ndarray, frame_left: int=1600, frame_right: int=3200, normalize=True) -> List[Tuple[int, int]]:
     onsets = librosa.onset.onset_detect(y=audio, sr=sr, units="samples")
@@ -173,48 +165,6 @@ def evaluate(normalize: bool, K_max: int, train_x: List[np.ndarray], train_y: np
             for idx,(n,base_d,bin_d) in enumerate(zip(num_pred, base_l_distance, bin_l_distance), start=1):
                 print(f" - K={idx}: ({n}, {base_d}, {bin_d})")
     return result
-
-def retrieve_audio_inputs(target_dir: str="audio/user", sr: int=16000) -> Tuple[List[np.ndarray], np.ndarray, float]:
-    donka_code2class = {
-        DON|RIGHT : 0,
-        DON|LEFT : 1,
-        KA| RIGHT : 2,
-        KA| LEFT : 3,
-    }
-    note_x_param: Dict[Tuple[str, int], List[np.ndarray]] = {}
-    note_x: List[np.ndarray] = []
-    note_y: np.ndarray = np.zeros((96,4))
-
-    # Estimate of noise
-    noise_arr, sr = librosa.load(os.path.join(target_dir, "noise.wav"), sr=sr)
-    noise_std: float = np.std(noise_arr)
-
-    # Retrieve proper inputs
-    audio_input_files = os.listdir(target_dir)
-    for file in audio_input_files:
-        if file=="noise.wav":
-            continue
-        try:
-            audio_arr, sr = librosa.load(os.path.join(target_dir, file), sr=sr)
-            
-            [volume,donka_code,idx] = file[:-4].split("_")
-            donka_code,idx = int(donka_code),int(idx)
-            if (volume,donka_code) not in note_x_param:
-                note_x_param[(volume,donka_code)] = []
-            note_x_param[(volume,donka_code)].append(audio_arr)
-
-        except ValueError as e:
-            print(f"Failed to load input file {file}.")
-            print(e)
-
-    # Set training/testing data
-    idx = 0
-    for (volume,donka_code),notes in note_x_param.items():
-        note_x += notes
-        note_y[idx:idx+len(notes),donka_code2class[donka_code]] = 1
-        idx += len(notes)
-
-    return note_x,note_y,noise_std
 
 def main():
     sr=16000

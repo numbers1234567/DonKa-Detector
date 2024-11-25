@@ -9,20 +9,7 @@ import threading
 import os
 import scipy.io.wavfile as wf
 import matplotlib.pyplot as plt
-
-DON = 0
-KA  = 1
-
-LEFT  = 0
-RIGHT = 2
-
-# Get noise statistics
-def get_noise_statistics(noise_wav: np.ndarray) -> Tuple[float,float]:
-    rms = librosa.feature.rms(y=noise_wav, frame_length=512, hop_length=512)[0,]
-    noisemedian = np.percentile(rms, 50)
-    sigma = np.percentile(rms, 84.1) - noisemedian
-
-    return (noisemedian, sigma)
+from utility import DON,KA,LEFT,RIGHT,get_noise_statistics
 
 def play_donka_audio(donka_code: int, p: pyaudio.PyAudio|None=None):
     # Non-blocking audio playing
