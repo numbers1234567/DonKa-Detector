@@ -157,30 +157,28 @@ def evaluate(normalize: bool, K: int, train_x: List[np.ndarray], train_y: np.nda
         total_pred += num_pred
     return (total_base_distance, total_bin_distance, total_pred),hist
 
-def main():
+def retrieve_audio_inputs(target_dir: str="audio/user", sr: int=16000) -> Tuple[List[np.ndarray], np.ndarray, float]:
     donka_code2class = {
         DON|RIGHT : 0,
         DON|LEFT : 1,
         KA| RIGHT : 2,
         KA| LEFT : 3,
     }
-
-    # Retrieve all data from audio/user
     note_x_param: Dict[Tuple[str, int], List[np.ndarray]] = {}
-    sr = 16000
     note_x: List[np.ndarray] = []
     note_y: np.ndarray = np.zeros((96,4))
 
     # Estimate of noise
-    noise_arr, sr = librosa.load("audio/user/noise.wav", sr=sr)
+    noise_arr, sr = librosa.load(os.path.join(target_dir, "noise.wav"), sr=sr)
     noise_std: float = np.std(noise_arr)
 
-    audio_input_files = os.listdir("audio/user")
+    # Retrieve proper inputs
+    audio_input_files = os.listdir(target_dir)
     for file in audio_input_files:
         if file=="noise.wav":
             continue
         try:
-            audio_arr, sr = librosa.load(os.path.join("audio/user", file), sr=sr)
+            audio_arr, sr = librosa.load(os.path.join(target_dir, file), sr=sr)
             
             [volume,donka_code,idx] = file[:-4].split("_")
             donka_code,idx = int(donka_code),int(idx)
@@ -199,6 +197,12 @@ def main():
         note_y[idx:idx+len(notes),donka_code2class[donka_code]] = 1
         idx += len(notes)
 
+    return note_x,note_y,noise_std
+
+def main():
+    sr=16000
+    # Retrieve all data from audio/user
+    note_x,note_y,noise_std = retrieve_audio_inputs()
 
     train_x,train_y = note_x[::2],note_y[::2]
     test_x,test_y = note_x[1::2],note_y[1::2]
