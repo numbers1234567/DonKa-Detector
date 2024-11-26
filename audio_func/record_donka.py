@@ -9,7 +9,7 @@ import threading
 import os
 import scipy.io.wavfile as wf
 import matplotlib.pyplot as plt
-from utility import DON,KA,LEFT,RIGHT,get_noise_statistics
+from utility import DON,KA,LEFT,RIGHT,get_noise_statistics,AudioStatistics
 
 def play_donka_audio(donka_code: int, p: pyaudio.PyAudio|None=None):
     # Non-blocking audio playing
@@ -36,12 +36,12 @@ def play_donka_audio(donka_code: int, p: pyaudio.PyAudio|None=None):
     thread = threading.Thread(target=_thread)
     thread.start()
 
-def retrieve_audio_input(audio: np.ndarray, noise_stat: Tuple[float,float], sample_rate: float,
+def retrieve_audio_input(audio: np.ndarray, noise_stat: AudioStatistics, sample_rate: float,
                          frame_left: int=1600, frame_right: int=3200) -> np.ndarray|None:
     # Use the first onset which is above the noise threshold
     onsets = librosa.onset.onset_detect(y=audio, sr=sample_rate, units="samples")
     rms = librosa.feature.rms(y=audio, frame_length=2048, hop_length=512)[0,]
-    noise_med,noise_sig = noise_stat
+    noise_med,noise_sig = noise_stat.get_energy_median(),noise_stat.get_energy_sigma()
 
     # Find onset with the maximum energy
     for onset in onsets:
@@ -56,7 +56,7 @@ def record_inputs(donka_code: int,
                   out_device_idx: int|None=None, 
                   sample_rate: int=16000, chunk_sz: int=512, 
                   p: pyaudio.PyAudio|None=None, 
-                  count: int=8, noise_stat: Tuple[float,float]|None=None,
+                  count: int=8, noise_stat: AudioStatistics|None=None,
                   on_note_callback: Callable[[np.ndarray], Any]=lambda x: 0) -> List[np.ndarray]:
     # Load audio for metronome
     donka_type = donka_code % 2
@@ -82,7 +82,7 @@ def record_inputs(donka_code: int,
             chunk = np.frombuffer(in_stream.read(chunk_sz), dtype=np.float32)
             noise_arr[i:i+chunk_sz] = chunk[:min(chunk_sz, sample_rate - i)]
 
-        noise_stat = get_noise_statistics(noise_arr)
+        noise_stat = AudioStatistics(noise_arr)
 
     # Record audio inputs
     input_samples: List[np.ndarray] = []
@@ -102,7 +102,7 @@ def record_inputs(donka_code: int,
 
         # Retrieve input once a new audio has been fully consumed
         rms = librosa.feature.rms(y=audio_arr[:2048], frame_length=512, hop_length=512)[0,]
-        if rms[4] >= noise_stat[0] + 3*noise_stat[1]:
+        if rms[4] >= noise_stat.get_energy_median() + 3*noise_stat.get_energy_sigma():
             note = retrieve_audio_input(audio_arr, noise_stat, sample_rate)
             if type(note)==np.ndarray and len(note) > 0:
                 input_samples.append(note.copy())
@@ -155,7 +155,7 @@ def main(in_device_idx: int|None=None,
         chunk = np.frombuffer(in_stream.read(chunk_sz), dtype=np.float32)
         noise_arr[i:i+chunk_sz] = chunk[:min(chunk_sz, sample_rate - i)]
 
-    noise_stat = get_noise_statistics(noise_arr)
+    noise_stat = AudioStatistics(noise_arr)
 
     in_stream.stop_stream()
     in_stream.close()

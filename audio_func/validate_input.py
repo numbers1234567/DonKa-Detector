@@ -7,7 +7,7 @@ import librosa
 from sklearn.neighbors import KNeighborsClassifier
 import os
 import matplotlib.pyplot as plt
-from utility import compute_mel_rep,retrieve_audio_inputs
+from utility import compute_mel_rep,retrieve_audio_inputs,AudioStatistics
 
 def create_random_chart(x: List[np.ndarray], y: np.ndarray, noise_std: float=0.01, note_rate: float=2, sr:int=16000, time_s: float = 5, frame_left: int=1600, frame_right: int=3200) -> Tuple[np.ndarray, np.ndarray]:
     # x: Arrays are wave forms
@@ -105,7 +105,12 @@ type KNNHyperParamK = int
 type KNNHyperParamIsNorm = bool
 type KNNHyperParam = Tuple[KNNHyperParamK, KNNHyperParamIsNorm]
 type KNNHyperParamMetric = Dict[KNNHyperParam, Dict[float, Tuple[float, float]]]
-def evaluate(normalize: bool, K_max: int, train_x: List[np.ndarray], train_y: np.ndarray, test_x: List[np.ndarray], test_y: np.ndarray, experiments: List[Tuple[int,float]], sr: int, noise_std: float=0.01, verbose=True, seed: int=42) -> KNNHyperParamMetric:
+def evaluate(normalize: bool, K_max: int, 
+             train_x: List[np.ndarray], train_y: np.ndarray, 
+             test_x: List[np.ndarray], test_y: np.ndarray, 
+             experiments: List[Tuple[int,float]], 
+             sr: int, noise_stat: AudioStatistics, 
+             verbose=True, seed: int=42) -> KNNHyperParamMetric:
     # So datasets are the same per-evaluation
     np.random.seed(seed)
     random.seed(seed)
@@ -127,7 +132,7 @@ def evaluate(normalize: bool, K_max: int, train_x: List[np.ndarray], train_y: np
         pbar = range(samples)
         for i in pbar:
             # Create test data
-            audio, chart_gt = create_random_chart(test_x, test_y, note_rate=note_rate, sr=sr, noise_std=noise_std)
+            audio, chart_gt = create_random_chart(test_x, test_y, note_rate=note_rate, sr=sr, noise_std=noise_stat.get_wav_std())
             chart_gt_sparse = [np.argmax(i) for idx,i in enumerate(chart_gt) if np.max(i) > 0.5]
             
             # Predict chart
@@ -169,7 +174,7 @@ def evaluate(normalize: bool, K_max: int, train_x: List[np.ndarray], train_y: np
 def main():
     sr=16000
     # Retrieve all data from audio/user
-    note_x,note_y,noise_std = retrieve_audio_inputs()
+    note_x,note_y,noise_stat = retrieve_audio_inputs()
 
     train_x,train_y = note_x[::2],note_y[::2]
     test_x,test_y = note_x[1::2],note_y[1::2]
@@ -194,7 +199,7 @@ def main():
     ]
 
     for normalize in hp:
-        evaluate(normalize, 5, train_x, train_y, test_x, test_y, experiments, sr, noise_std=noise_std, verbose=True)
+        evaluate(normalize, 5, train_x, train_y, test_x, test_y, experiments, sr, noise_stat=noise_stat, verbose=True)
 
 if __name__=="__main__":
     import argparse
