@@ -11,7 +11,7 @@ import scipy.io.wavfile as wf
 import matplotlib.pyplot as plt
 from utility import DON,KA,LEFT,RIGHT,get_noise_statistics,AudioStatistics
 
-def play_donka_audio(donka_code: int, p: pyaudio.PyAudio|None=None):
+def play_donka_audio(donka_code: int, amplification: float=1, p: pyaudio.PyAudio|None=None):
     # Non-blocking audio playing
     def _thread():
         file = "audio/metronome/Don.wav" if donka_code%2==DON else "audio/metronome/Katsu.wav"
@@ -24,8 +24,9 @@ def play_donka_audio(donka_code: int, p: pyaudio.PyAudio|None=None):
                                     rate=wf.getframerate(),
                                     output=True)
                 chunk = 512
-                while len(data := wf.readframes(chunk)):  # Requires Python 3.8+ for :=
-                    stream.write(data)
+                while len(data := wf.readframes(chunk)):
+                    audio = np.round(np.frombuffer(data, dtype=np.int16) * amplification).astype(np.int16)
+                    stream.write(audio.tobytes())
 
                 stream.close()
             except OSError:
@@ -52,12 +53,16 @@ def retrieve_audio_input(audio: np.ndarray, noise_stat: AudioStatistics, sample_
 
 
 def record_inputs(donka_code: int,
+                  volume: str,
                   in_device_idx: int|None=None, 
                   out_device_idx: int|None=None, 
                   sample_rate: int=16000, chunk_sz: int=512, 
                   p: pyaudio.PyAudio|None=None, 
                   count: int=8, noise_stat: AudioStatistics|None=None,
                   on_note_callback: Callable[[np.ndarray], Any]=lambda x: 0) -> List[np.ndarray]:
+    amp = 1
+    if volume=="medium": amp=2/3
+    if volume=="quiet": amp=1/3
     # Load audio for metronome
     donka_type = donka_code % 2
 
@@ -91,7 +96,7 @@ def record_inputs(donka_code: int,
 
     while len(input_samples) < count:
         if len(audio_arr)//2 <= timing and timing < len(audio_arr)//2 + chunk_sz:
-            play_donka_audio(donka_type, p=audio)
+            play_donka_audio(donka_type, amplification=amp, p=audio)
 
         # Read next chunk
         chunk = np.frombuffer(in_stream.read(chunk_sz), dtype=np.float32)
@@ -173,7 +178,7 @@ def main(in_device_idx: int|None=None,
         side_string = "left" if side==LEFT else "right"
 
         log(f"Play {side_string} {donka_string}s with {volume} volume to the beat!", tag="USER-INPUT")
-        notes = record_inputs(donka|side, in_device_idx=in_device_idx, 
+        notes = record_inputs(donka|side, volume, in_device_idx=in_device_idx, 
                               out_device_idx=out_device_idx, sample_rate=sample_rate,
                               chunk_sz=chunk_sz, p=p, noise_stat=noise_stat,
                               on_note_callback=lambda x: log(" - Detected!"))
