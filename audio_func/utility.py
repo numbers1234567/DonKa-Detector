@@ -3,11 +3,13 @@ from typing import Tuple, List, Dict
 import numpy as np
 import os
 
-DON = 0
-KA  = 1
 
-LEFT  = 0
-RIGHT = 2
+type DonkaCode = int
+DON: DonkaCode = 0
+KA: DonkaCode  = 1
+
+LEFT: DonkaCode  = 0
+RIGHT: DonkaCode = 2
 
 # Get noise statistics
 def get_noise_statistics(noise_wav: np.ndarray) -> Tuple[float,float]:
