@@ -4,8 +4,9 @@ import random
 from Levenshtein import distance as levenshtein_distance
 import librosa.onset
 import librosa
-from sklearn.neighbors import KNeighborsClassifier
 import os
+import os.path
+import struct
 import matplotlib.pyplot as plt
 from utility import compute_mel_rep,retrieve_audio_inputs,AudioStatistics
 
@@ -198,8 +199,28 @@ def main():
         (10, 8),
     ]
 
+    
+    results: KNNHyperParamMetric = {}
+
     for normalize in hp:
-        evaluate(normalize, 5, train_x, train_y, test_x, test_y, experiments, sr, noise_stat=noise_stat, verbose=True)
+        results.update(
+            evaluate(normalize, 5, 
+                     train_x, train_y, 
+                     test_x, test_y, 
+                     experiments, sr, noise_stat=noise_stat, 
+                     verbose=True)
+        )
+
+    # Save results
+    val_dir = ".val_cache"
+    if not os.path.isdir(val_dir):
+        os.mkdir(val_dir)
+
+    with open(os.path.join(val_dir, "knn"), "wb") as f:
+        for (k,is_norm),sub_res in results.items():
+            for note_rate,(bin_acc,base_acc) in sub_res.items():
+                b = struct.pack("I?ddd", k, is_norm, note_rate, bin_acc, base_acc)
+                f.write(b)
 
 if __name__=="__main__":
     import argparse
