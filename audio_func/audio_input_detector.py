@@ -16,10 +16,6 @@ from validate_input import KNNHyperParamMetric
 
 import threading
 
-results = []
-bruh = []
-hey = []
-
 def note_detect(audio: np.ndarray, sr: int, train_mel: List[np.ndarray], train_y: np.ndarray, frame_left: int=1600, frame_right: int=3200, K=5, normalize=True) -> List[Tuple[int, int]]:
     onsets = librosa.onset.onset_detect(y=audio, sr=sr, units="samples")
 
@@ -133,13 +129,9 @@ class AudioInputDetector:
         self.last_10_note_min_energy: np.ndarray = np.zeros((10, )) - 1
 
     def detect_note(self) -> List[Tuple[DonkaCode,float]]:
-        #self.audio_buffer[:self.frame_left] = np.random.normal(0, self.noise_stat.get_wav_std())
-        f = time.time()
-        tot = 0
         onsets = librosa.onset.onset_detect(y=self.audio_buffer, sr=self.sample_rate, units="samples")
 
         result = []
-        # print("=========")
         for onset in onsets:
             # Not enough data
             if onset < self.frame_left or onset >= self.buffer_sz - self.frame_right:
@@ -147,20 +139,11 @@ class AudioInputDetector:
             # Noise
             if self.rms[onset//self.rms_hop_length] <= self.noise_stat.get_energy_median() + 3*self.noise_stat.get_energy_sigma():
                 continue
-            # print("Onset: ", onset)
-            energy_bw = \
-                self.rms[max(0, int(self.last_10_note_sample[-1])) // self.rms_hop_length:
-                         onset // self.rms_hop_length]
-
-            # This is a continuation of the previous note
-            #if onset < self.last_10_note_sample[-1] + self.frame_left \
-            #     or self.last_10_note_min_energy[-1] >= self.rms[onset//self.rms_hop_length]:
-            #    continue
+            
             if onset <= self.last_10_note_sample[-1] + self.frame_left:
                 continue
 
             note = self.audio_buffer[onset-self.frame_left:onset+self.frame_right].copy()
-            #results.append((self.audio_buffer.copy(), onsets))
             
             # Classify onset
             cls2donka_code = [
@@ -175,21 +158,17 @@ class AudioInputDetector:
             for other_note_mel,cls in zip(self.train_mel, self.train_y):
                 cls = np.argmax(cls)
                 cls_distance.append((np.sum((other_note_mel - note_mel)**2)**0.5, cls))
-            tot += time.time()-s
 
             cls_distance.sort()
             donka_code = cls2donka_code[cls_distance[0][1]]
-            # print([int(i[1]) for i in cls_distance])
+            
             note_time = self.time_recv[onset // self.chunk_sz]
 
             note_time -= self.chunk_sz / self.sample_rate
             note_time += (onset % self.chunk_sz) / self.sample_rate
 
-            #print(onset)
-
-
             result.append((donka_code, note_time, onset))
-        #print(tot, time.time()-f)
+        
         return result
         
     def add_chunk(self, chunk: np.ndarray, chunk_time: float):
@@ -207,7 +186,6 @@ class AudioInputDetector:
 
         # Timing
         self.last_10_note_sample -= self.chunk_sz
-        #print(self.last_10_note_sample)
 
     def run(self):
         in_stream = self.audio_interface.open(
@@ -219,23 +197,13 @@ class AudioInputDetector:
                   tag="INFO", method="__init__")
         
         while self.running:
-            #t = time.time()
             chunk = np.frombuffer(in_stream.read(self.chunk_sz), dtype=np.float32)
-            #print(time.time() - t)
             self.add_chunk(chunk, time.time())
-            bruh.append(self.last_10_note_min_energy[-1])
-            for i in self.last_10_note_sample:
-                if i - self.chunk_sz < self.chunk_sz and i >= self.chunk_sz:
-                    hey.append(self.audio_buffer.copy())
-                    hey.append(chunk.copy())
-                    print(self.last_10_note_sample)
 
             for donka_code, note_time, onset in self.detect_note():
                 self.last_10_note_sample[:-1] = self.last_10_note_sample[1:].copy()
                 self.last_10_note_sample[-1] = onset
-                self.last_10_note_min_energy[:-1] = self.last_10_note_min_energy[1:].copy()
-                self.last_10_note_min_energy[-1] = self.rms[onset // self.rms_hop_length]
-                #self.audio_buffer[:onset + self.frame_left] = 0
+                
                 self.detect_callback(donka_code, note_time)
 
 
@@ -258,7 +226,6 @@ class AudioInputDetector:
 
 def main():
     train_x,train_y,noise_stat = retrieve_audio_inputs()
-    print(train_y)
     detector = AudioInputDetector(train_x, train_y, noise_stat, print)
 
     thread = detector.start()
@@ -267,19 +234,8 @@ def main():
     detector.stop()
 
     thread.join()
-    #plt.plot(detector.audio_buffer)
-    #plt.show()
 
     print(detector.last_10_note_sample)
 
 if __name__=="__main__":
     main()
-    #for result in results:
-    #    plt.plot(result[0])
-    #    plt.plot(result[1], [0] * len(result[1]), "bo")
-#
-    #    plt.show()
-#
-    #for result in hey:
-    #    plt.plot(result)
-    #    plt.show()
