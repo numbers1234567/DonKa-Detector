@@ -235,7 +235,5 @@ def main():
 
     thread.join()
 
-    print(detector.last_10_note_sample)
-
 if __name__=="__main__":
     main()
