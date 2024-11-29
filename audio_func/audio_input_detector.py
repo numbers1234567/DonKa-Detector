@@ -191,7 +191,7 @@ class AudioInputDetector:
         self._log(f"Using input device {self.audio_interface.get_device_info_by_host_api_device_index(0, self.in_device_idx).get('name')}.",
                   tag="INFO", method="__init__")
         
-        self.reset_timing()
+        self.reset_timing(time.time())
 
         while self.running:
             chunk = np.frombuffer(in_stream.read(self.chunk_sz), dtype=np.float32)
