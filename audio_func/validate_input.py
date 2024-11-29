@@ -8,7 +8,11 @@ import os
 import os.path
 import struct
 import matplotlib.pyplot as plt
-from utility import compute_mel_rep,retrieve_audio_inputs,AudioStatistics
+
+try:
+    from utility import compute_mel_rep,retrieve_audio_inputs,AudioStatistics
+except:
+    from .utility import compute_mel_rep,retrieve_audio_inputs,AudioStatistics
 
 def create_random_chart(x: List[np.ndarray], y: np.ndarray, noise_std: float=0.01, note_rate: float=2, sr:int=16000, time_s: float = 5, frame_left: int=1600, frame_right: int=3200) -> Tuple[np.ndarray, np.ndarray]:
     # x: Arrays are wave forms
