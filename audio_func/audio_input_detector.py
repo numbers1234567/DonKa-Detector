@@ -74,7 +74,8 @@ class AudioInputDetector:
         self.buffer_sz,self.chunk_sz = buffer_sz,chunk_sz
         self.audio_buffer = np.zeros((buffer_sz,))
         self.time_recv = np.zeros((buffer_sz // self.chunk_sz, ))  # Time the chunk was received. This assumes that the last sample in the chunk was recorded at that time
-
+        self.reset_timing(time.time())
+        
         self.audio_interface: pyaudio.PyAudio = audio_interface if audio_interface else pyaudio.PyAudio()
         self.in_device_idx = self.audio_interface.get_default_input_device_info()['index'] if in_device_idx < 0 else in_device_idx
 
@@ -96,7 +97,13 @@ class AudioInputDetector:
         self.add_chunk_time_logs = []
         self.loop_time_logs = []
 
-    def detect_note(self) -> List[Tuple[DonkaCode,float]]:
+    def reset_timing(self, time: float):
+        self.start_time = time
+        self.time_recv[-1] = self.start_time
+        for i in range(self.buffer_sz//self.chunk_sz - 2, -1, -1):
+            self.time_recv[i] = self.time_recv[i+1] - self.chunk_sz / self.sample_rate
+
+    def detect_note(self) -> List[Tuple[DonkaCode,int]]:
         t = time.time()
         onsets = librosa.onset.onset_detect(y=self.audio_buffer, 
                                             onset_envelope=librosa.onset.onset_strength(
@@ -139,17 +146,16 @@ class AudioInputDetector:
 
             cls_distance.sort()
             donka_code = cls2donka_code[cls_distance[0][1]]
-            
-            note_time = self.time_recv[onset // self.chunk_sz]
-
-            note_time -= self.chunk_sz / self.sample_rate
-            note_time += (onset % self.chunk_sz) / self.sample_rate
 
             if self.record_time_logs: self.this_classify_time += time.time() - t
 
-            result.append((donka_code, note_time, onset))
+            result.append((donka_code, onset))
         
         return result
+    
+    def register_note(self, donka_code: DonkaCode, sample: int):
+        self.last_10_note_sample[:-1] = self.last_10_note_sample[1:]
+        self.last_10_note_sample[-1] = sample
         
     def add_chunk(self, chunk: np.ndarray):
         assert chunk.shape == (self.chunk_sz,)
@@ -185,10 +191,7 @@ class AudioInputDetector:
         self._log(f"Using input device {self.audio_interface.get_device_info_by_host_api_device_index(0, self.in_device_idx).get('name')}.",
                   tag="INFO", method="__init__")
         
-        self.start_time = time.time()
-        self.time_recv[-1] = self.start_time
-        for i in range(self.buffer_sz//self.chunk_sz - 2, -1, -1):
-            self.time_recv[i] = self.time_recv[i+1] - self.chunk_sz / self.sample_rate
+        self.reset_timing()
 
         while self.running:
             chunk = np.frombuffer(in_stream.read(self.chunk_sz), dtype=np.float32)
@@ -198,9 +201,14 @@ class AudioInputDetector:
             if self.record_time_logs:
                 self.add_chunk_time_logs.append(time.time() - add_chunk_start)
 
-            for donka_code, note_time, onset in self.detect_note():
-                self.last_10_note_sample[:-1] = self.last_10_note_sample[1:]
-                self.last_10_note_sample[-1] = onset
+            for donka_code, onset in self.detect_note():
+                self.register_note(donka_code, onset)
+
+                # Note time as a linear transformation
+                # In practice, the third operation here does not have effect as onset detection is chunk-based.
+                note_time = self.time_recv[onset // self.chunk_sz]
+                note_time -= self.chunk_sz / self.sample_rate
+                note_time += (onset % self.chunk_sz) / self.sample_rate
                 
                 self.detect_callback(donka_code, note_time)
             
