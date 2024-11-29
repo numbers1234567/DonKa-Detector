@@ -10,64 +10,18 @@ import struct
 import time
 import matplotlib.pyplot as plt
 
-from utility import compute_mel_rep,DonkaCode,AudioStatistics,retrieve_audio_inputs,\
-    DON,KA,LEFT,RIGHT
-from validate_input import KNNHyperParamMetric
+if __name__=="__main__":
+    from utility import compute_mel_rep,DonkaCode,AudioStatistics,retrieve_audio_inputs,\
+        DON,KA,LEFT,RIGHT
+    from validate_input import KNNHyperParamMetric
+else:
+    from .utility import compute_mel_rep,DonkaCode,AudioStatistics,retrieve_audio_inputs,\
+        DON,KA,LEFT,RIGHT
+    from .validate_input import KNNHyperParamMetric
 
 import threading
 
-def note_detect(audio: np.ndarray, sr: int, train_mel: List[np.ndarray], train_y: np.ndarray, frame_left: int=1600, frame_right: int=3200, K=5, normalize=True) -> List[Tuple[int, int]]:
-    onsets = librosa.onset.onset_detect(y=audio, sr=sr, units="samples")
-
-    random.seed(123)
-
-    # Calculate RMS energy per frame.
-    rms = librosa.feature.rms(y=audio, frame_length=512, hop_length=512)[0,]
-    envtm = librosa.frames_to_time(np.arange(len(rms)), sr=sr, hop_length=512)
-
-    # Use first second as a representative of background noise
-    noiseidx = envtm <= 1
-    noisemedian = np.percentile(rms[noiseidx], 50)
-    sigma = np.percentile(rms[noiseidx], 84.1) - noisemedian
-
-    threshold = noisemedian + 5*sigma
-    
-    # Transform training data
-    if normalize: train_mel: List[np.ndarray] = [i/np.sum(i) for i in train_mel]
-
-    last_onset = -frame_left
-
-    answer = []
-
-    knn = KNeighborsClassifier(K)
-    knn.fit(train_mel, [np.argmax(i) for i in train_y])
-
-    # Classify each onset
-    for onset in onsets:
-        # Likely detecting the previous onset
-        if onset < last_onset + frame_left: continue
-
-        note = audio[onset-frame_left:onset+frame_right]
-        # Invalid position
-        if note.shape != (frame_left + frame_right,):
-            continue
-        # Likely background noise
-        if rms[onset//512] <= threshold:
-            continue
-
-        note_mel = compute_mel_rep(note)
-        if normalize: note_mel /= np.sum(note_mel)
-
-        # Problem-specific vote system
-        votes = knn.predict_proba([note_mel.flatten()])[0]
-        if votes[0] + votes[1] > votes[2] + votes[3]:
-            answer.append((onset, np.argmax(votes[:2])))
-        elif votes[0] + votes[1] < votes[2] + votes[3]:
-            answer.append((onset, np.argmax(votes[2:4]) + 2))
-        else:
-            answer.append((onset, np.argmax(votes)))
-        last_onset = onset
-    return answer
+notes = []
 
 class AudioInputDetector:
     def __init__(self, 
@@ -77,11 +31,14 @@ class AudioInputDetector:
                  detect_callback: Callable[[DonkaCode, float],Any],  # detect_callback(which_detected, time_detected)
                  frame_left: int=1600, frame_right: int=3200,
                  in_device_idx: int = -1,
-                 sample_rate: int=16000, chunk_sz=512, buffer_sz: int=16000,
+                 sample_rate: int=16000, chunk_sz=512, buffer_sz: int=15872,
                  audio_interface: pyaudio.PyAudio|None=None,
                  val_data_dir: str=".val_cache",
-                 verbose: bool=False
+                 verbose: bool=False,
+                 record_time_logs: bool=False,
                 ):
+        # Make computations easier
+        assert buffer_sz % chunk_sz == 0
         self.verbose = verbose
         self.running = False
 
@@ -123,18 +80,39 @@ class AudioInputDetector:
 
         # Real-time operations. These are updated on every read from the audio stream
         self.rms_frame_length, self.rms_hop_length=self.chunk_sz,self.chunk_sz
-        self.rms = librosa.feature.rms(y=self.audio_buffer, frame_length=self.rms_frame_length, hop_length=self.rms_hop_length)[0,]
+        self.rms = librosa.feature.rms(y=self.audio_buffer, frame_length=self.rms_frame_length, hop_length=self.rms_hop_length, center=False)[0,]
+        self.mel = librosa.feature.melspectrogram(y=self.audio_buffer, sr=sample_rate)
 
         self.last_10_note_sample: np.ndarray = np.zeros((10, )) - 1e9
         self.last_10_note_min_energy: np.ndarray = np.zeros((10, )) - 1
 
+        self.start_time: float = 0
+
+        # Operation timing
+        self.record_time_logs = record_time_logs
+        self.onset_time_logs = []
+        self.this_classify_time = 0
+        self.classify_time_logs = []
+        self.add_chunk_time_logs = []
+        self.loop_time_logs = []
+
     def detect_note(self) -> List[Tuple[DonkaCode,float]]:
-        onsets = librosa.onset.onset_detect(y=self.audio_buffer, sr=self.sample_rate, units="samples")
+        t = time.time()
+        onsets = librosa.onset.onset_detect(y=self.audio_buffer, 
+                                            onset_envelope=librosa.onset.onset_strength(
+                                                y=self.audio_buffer,
+                                                sr=self.sample_rate,
+                                                S=self.mel,
+                                            ),
+                                            sr=self.sample_rate, 
+                                            units="samples")
+        #onsets = librosa.onset.onset_detect(y=self.audio_buffer, sr=self.sample_rate, units="samples")
+        if self.record_time_logs: self.onset_time_logs.append(time.time() - t)
 
         result = []
         for onset in onsets:
             # Not enough data
-            if onset < self.frame_left or onset >= self.buffer_sz - self.frame_right:
+            if onset < self.buffer_sz//2 or onset >= self.buffer_sz - self.frame_right:
                 continue
             # Noise
             if self.rms[onset//self.rms_hop_length] <= self.noise_stat.get_energy_median() + 3*self.noise_stat.get_energy_sigma():
@@ -143,8 +121,9 @@ class AudioInputDetector:
             if onset <= self.last_10_note_sample[-1] + self.frame_left:
                 continue
 
-            note = self.audio_buffer[onset-self.frame_left:onset+self.frame_right].copy()
-            
+            t = time.time()
+            note = self.audio_buffer[onset-self.frame_left:onset+self.frame_right]
+            notes.append((self.audio_buffer.copy(),onset))
             # Classify onset
             cls2donka_code = [
                 DON|RIGHT,
@@ -153,7 +132,6 @@ class AudioInputDetector:
                 KA|LEFT,
             ]
             cls_distance: List[Tuple[float, int]] = []
-            s = time.time()
             note_mel = compute_mel_rep(note, self.sample_rate)
             for other_note_mel,cls in zip(self.train_mel, self.train_y):
                 cls = np.argmax(cls)
@@ -167,25 +145,36 @@ class AudioInputDetector:
             note_time -= self.chunk_sz / self.sample_rate
             note_time += (onset % self.chunk_sz) / self.sample_rate
 
+            if self.record_time_logs: self.this_classify_time += time.time() - t
+
             result.append((donka_code, note_time, onset))
         
         return result
         
-    def add_chunk(self, chunk: np.ndarray, chunk_time: float):
+    def add_chunk(self, chunk: np.ndarray):
         assert chunk.shape == (self.chunk_sz,)
 
         # Shift buffers
-        self.time_recv[:-1] = self.time_recv[1:]
-        self.audio_buffer[:-self.chunk_sz] = self.audio_buffer[self.chunk_sz:].copy()
+        self.audio_buffer[:-self.chunk_sz] = self.audio_buffer[self.chunk_sz:]
+        self.rms[:-1] = self.rms[1:]
+        self.mel[:,:-1] = self.mel[:,1:]
         
         # Add chunk
-        self.time_recv[-1] = chunk_time
-        self.audio_buffer[-self.chunk_sz:] = chunk.copy()
-        self.rms = librosa.feature.rms(y=self.audio_buffer, frame_length=self.rms_frame_length, hop_length=self.rms_hop_length)[0,]
+        self.audio_buffer[-self.chunk_sz:] = chunk
+        chunk_energy = librosa.feature.rms(y=self.audio_buffer[-self.chunk_sz:],
+                                           frame_length=self.rms_frame_length,
+                                           hop_length=self.rms_hop_length, center=False)[0,0]
+        self.rms[-1] = chunk_energy
+        chunk_mel = np.abs(librosa.feature.melspectrogram(y=self.audio_buffer[-3072:], sr=self.sample_rate)[:,3:])
+        chunk_mel = librosa.core.power_to_db(chunk_mel)
+        #print(chunk_mel.shape)
+        #print(self.mel[:,-chunk_mel.shape[1]:].shape)
+        self.mel[:,-chunk_mel.shape[1]:] = chunk_mel
         self.last_10_note_min_energy[-1] = min(self.last_10_note_min_energy[-1], self.rms[-1])
 
         # Timing
         self.last_10_note_sample -= self.chunk_sz
+        self.time_recv += self.chunk_sz/self.sample_rate
 
     def run(self):
         in_stream = self.audio_interface.open(
@@ -196,15 +185,28 @@ class AudioInputDetector:
         self._log(f"Using input device {self.audio_interface.get_device_info_by_host_api_device_index(0, self.in_device_idx).get('name')}.",
                   tag="INFO", method="__init__")
         
+        self.start_time = time.time()
+        self.time_recv[-1] = self.start_time
+        for i in range(self.buffer_sz//self.chunk_sz - 2, -1, -1):
+            self.time_recv[i] = self.time_recv[i+1] - self.chunk_sz / self.sample_rate
+
         while self.running:
             chunk = np.frombuffer(in_stream.read(self.chunk_sz), dtype=np.float32)
-            self.add_chunk(chunk, time.time())
+            self.this_classify_time = 0
+            add_chunk_start = time.time()
+            self.add_chunk(chunk)
+            if self.record_time_logs:
+                self.add_chunk_time_logs.append(time.time() - add_chunk_start)
 
             for donka_code, note_time, onset in self.detect_note():
-                self.last_10_note_sample[:-1] = self.last_10_note_sample[1:].copy()
+                self.last_10_note_sample[:-1] = self.last_10_note_sample[1:]
                 self.last_10_note_sample[-1] = onset
                 
                 self.detect_callback(donka_code, note_time)
+            
+            if self.record_time_logs:
+                self.loop_time_logs.append(time.time() - add_chunk_start)
+                self.classify_time_logs.append(self.this_classify_time)
 
 
         in_stream.stop_stream()
@@ -212,6 +214,11 @@ class AudioInputDetector:
 
     def start(self) -> threading.Thread:
         self.running = True
+        self.audio_buffer = np.zeros((self.buffer_sz,))
+        self.rms = librosa.feature.rms(y=self.audio_buffer, frame_length=self.rms_frame_length, hop_length=self.rms_hop_length, center=False)[0,]
+        self.last_10_note_sample: np.ndarray = np.zeros((10,)) - 1e9
+        self.last_10_note_min_energy: np.ndarray = np.zeros((10,)) - 1
+
         thread = threading.Thread(target=lambda: self.run())
 
         thread.start()
@@ -226,14 +233,24 @@ class AudioInputDetector:
 
 def main():
     train_x,train_y,noise_stat = retrieve_audio_inputs()
-    detector = AudioInputDetector(train_x, train_y, noise_stat, print)
+    detector = AudioInputDetector(train_x, train_y, noise_stat, lambda donka_code,t : print(donka_code, t, time.time() - t), record_time_logs=True)
 
     thread = detector.start()
     input()
 
     detector.stop()
+    plt.plot(detector.loop_time_logs, label="Total Loop Time")
+    plt.plot(detector.onset_time_logs, label="Onset Detect Time")
+    plt.plot(detector.classify_time_logs, label="Classify Time")
+    plt.plot(detector.add_chunk_time_logs, label="Add Chunk Time")
+    plt.legend()
+    plt.show()
 
     thread.join()
 
 if __name__=="__main__":
     main()
+    for note in notes:
+        plt.plot(note[0])
+        plt.plot([note[1]], [0], "ro")
+        plt.show()
