@@ -31,7 +31,7 @@ class AudioInputDetector:
                  detect_callback: Callable[[DonkaCode, float],Any],  # detect_callback(which_detected, time_detected)
                  frame_left: int=1600, frame_right: int=3200,
                  in_device_idx: int = -1,
-                 sample_rate: int=16000, chunk_sz=512, buffer_sz: int=15872,
+                 sample_rate: int=16000, chunk_sz=512, buffer_sz: int=7680,
                  audio_interface: pyaudio.PyAudio|None=None,
                  val_data_dir: str=".val_cache",
                  verbose: bool=False,
@@ -119,7 +119,7 @@ class AudioInputDetector:
         result = []
         for onset in onsets:
             # Not enough data
-            if onset < self.buffer_sz//2 or onset >= self.buffer_sz - self.frame_right:
+            if onset < self.buffer_sz//2 or onset > self.buffer_sz - 1024:
                 continue
             # Noise
             if self.rms[onset//self.rms_hop_length] <= self.noise_stat.get_energy_median() + 3*self.noise_stat.get_energy_sigma():
@@ -129,7 +129,7 @@ class AudioInputDetector:
                 continue
 
             t = time.time()
-            note = self.audio_buffer[onset-self.frame_left:onset+self.frame_right]
+            note = self.audio_buffer[onset-1024:onset+1024]
             notes.append((self.audio_buffer.copy(),onset))
             # Classify onset
             cls2donka_code = [

@@ -34,7 +34,7 @@ def get_noise_statistics(noise_wav: np.ndarray) -> Tuple[float,float]:
     return (noisemedian, sigma)
 
 def compute_mel_rep(note: np.ndarray, sr: int) -> np.ndarray:
-    return librosa.feature.melspectrogram(y=note, sr=sr, n_mels=128, fmax=8000)
+    return librosa.feature.melspectrogram(y=note, sr=sr, n_mels=128, fmax=8000, center=False)[:,0]
 
 def retrieve_audio_inputs(target_dir: str="audio/user", sr: int=16000) -> Tuple[List[np.ndarray], np.ndarray, AudioStatistics]:
     donka_code2class = {
