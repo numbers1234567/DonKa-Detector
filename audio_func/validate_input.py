@@ -84,9 +84,9 @@ def retrieve_chart_multik(audio: np.ndarray, sr: int, train_x: List[np.ndarray],
         # Likely detecting the previous onset
         if onset < last_onset + frame_left: continue
 
-        note = audio[onset-512:onset+512]
+        note = audio[onset-1024:onset+1024]
         # Invalid position
-        if note.shape != (512 + 512,):
+        if note.shape != (1024 + 1024,):
             continue
         # Likely background noise
         if rms[onset//512] <= threshold:
